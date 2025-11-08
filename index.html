@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lesson Note Dictation Assistant</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load html2pdf for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -84,6 +86,11 @@
                     </button>
                 </div>
             </div>
+            
+            <!-- New PDF Download Button -->
+            <button type="button" onclick="downloadPDF()" class="w-full bg-green-500 text-white font-bold py-3 rounded-lg hover:bg-green-600 transition duration-150 shadow-md">
+                Download Notes as PDF
+            </button>
 
             <button type="button" onclick="document.getElementById('lessonForm').reset()" class="w-full bg-gray-200 text-gray-700 font-bold py-3 rounded-lg hover:bg-gray-300 transition duration-150 shadow-inner">
                 Clear All Notes
@@ -99,10 +106,12 @@
         const messageBox = document.getElementById('messageBox');
         const messageText = document.getElementById('messageText');
         const speakButtons = document.querySelectorAll('.speak-btn');
+        const originalButtonText = "Start Speaking";
+        
         let recognition = null;
         let isRecognizing = false;
+        let currentTargetButton = null;
         let currentTargetElement = null;
-        let originalButtonText = "Start Speaking";
 
         // --- Utility Functions ---
 
@@ -139,91 +148,123 @@
          */
         function updateButtonState(button, active) {
             if (active) {
-                button.textContent = "Listening...";
+                // Disable all buttons initially
+                speakButtons.forEach(btn => btn.disabled = true);
+                
+                // Set active button state
+                button.textContent = "Stop Dictation";
+                button.disabled = false; // Re-enable the active button to allow stopping
                 button.classList.remove('bg-blue-500', 'hover:bg-blue-600');
                 button.classList.add('bg-red-500', 'hover:bg-red-600');
-                button.disabled = true; // Disable current button while recognizing
             } else {
+                // Reset button state
                 button.textContent = originalButtonText;
                 button.classList.remove('bg-red-500', 'hover:bg-red-600');
                 button.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                
                 // Re-enable all buttons once recognition is finished/stopped
                 speakButtons.forEach(btn => btn.disabled = false);
             }
         }
 
-        // --- Speech Recognition Setup ---
+        // --- Speech Recognition Core Functions ---
 
-        function initRecognition(targetElement) {
+        function startRecognition(targetElement, button) {
             if (!SpeechRecognition) {
-                displayMessage("Speech recognition is not supported in this browser. Please try Chrome, Edge, or an updated version of Safari.", 'error');
-                return null;
+                displayMessage("Speech recognition is not supported in this browser.", 'error');
+                return;
             }
 
-            // Stop any existing recognition instance first
-            if (recognition && isRecognizing) {
-                recognition.stop();
+            // Clean up any lingering recognition state
+            if (isRecognizing) {
+                // Stop current instance immediately before starting a new one
+                stopRecognition(false); 
             }
 
-            // Create new instance
+            // Initialize/reset recognition instance
             recognition = new SpeechRecognition();
-            recognition.continuous = true; // Keep listening until explicitly stopped
-            recognition.interimResults = true; // Show results as they are being recognized
-            recognition.lang = 'en-US'; // Default language
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US'; 
 
             currentTargetElement = targetElement;
-            const targetButton = document.querySelector(`[data-target="${targetElement.id}"]`);
+            currentTargetButton = button;
+            
+            // Store original content to append to
+            currentTargetElement.dataset.originalContent = currentTargetElement.value;
 
             recognition.onstart = () => {
                 isRecognizing = true;
-                updateButtonState(targetButton, true);
-                displayMessage(`Recording started for ${targetElement.id}. Speak now...`, 'info');
+                updateButtonState(currentTargetButton, true);
+                displayMessage(`Dictation started for ${targetElement.id}. Speak now...`, 'info');
             };
 
             recognition.onresult = (event) => {
-                let interimTranscript = '';
                 let finalTranscript = '';
-
+                let interimTranscript = '';
+                
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
                     if (event.results[i].isFinal) {
-                        finalTranscript += transcript;
+                        finalTranscript += transcript + ' ';
                     } else {
                         interimTranscript += transcript;
                     }
                 }
-
-                // If this is the first result, set the element's content, otherwise append
-                if (event.resultIndex === 0 && !targetElement.value) {
-                    targetElement.value = finalTranscript;
-                } else if (finalTranscript) {
-                    // Append new final text, preceded by a space or new line for clarity
-                    targetElement.value += (targetElement.value.endsWith('.') || targetElement.value.endsWith('\n') ? ' ' : '\n') + finalTranscript;
-                }
-                // Optional: Show interim results for live feedback (can be removed if distracting)
-                // targetElement.placeholder = targetElement.value + interimTranscript + '...';
+                
+                // Update value with previous content + new final + interim
+                currentTargetElement.value = currentTargetElement.dataset.originalContent + finalTranscript + interimTranscript;
             };
 
             recognition.onerror = (event) => {
-                isRecognizing = false;
-                updateButtonState(targetButton, false);
                 console.error('Speech Recognition Error:', event.error);
-                let errorMessage = 'An error occurred during speech recognition.';
-                if (event.error === 'not-allowed') {
-                    errorMessage = 'Microphone access denied. Please check your browser permissions.';
-                } else if (event.error === 'no-speech') {
-                    errorMessage = 'No speech detected. Please speak louder or clearer.';
-                }
+                let errorMessage = 'An error occurred during speech recognition. Check microphone permissions.';
+                stopRecognition(false); // Stop cleanup, but prevent success message
                 displayMessage(errorMessage, 'error');
             };
 
             recognition.onend = () => {
+                // Final commit of text and cleanup
+                if (currentTargetElement && currentTargetElement.dataset.originalContent) {
+                    // Commit the final text (stripping potential trailing interim text)
+                    currentTargetElement.value = currentTargetElement.value.trim();
+                    delete currentTargetElement.dataset.originalContent;
+                }
+                
+                // Only clean up UI if not handled by onerror
+                if (currentTargetButton && !messageBox.classList.contains('bg-red-100')) {
+                    updateButtonState(currentTargetButton, false);
+                }
+                
                 isRecognizing = false;
-                updateButtonState(targetButton, false);
-                displayMessage('Dictation stopped. Finalizing text...', 'success');
+                currentTargetButton = null;
+                currentTargetElement = null;
+                
+                // Show success message only if not already showing an error
+                if (!messageBox.classList.contains('bg-red-100')) {
+                    displayMessage('Dictation session ended.', 'success');
+                }
             };
+            
+            recognition.start();
+        }
 
-            return recognition;
+        function stopRecognition(showSuccessMessage = true) {
+            if (recognition && isRecognizing) {
+                recognition.stop();
+                if (showSuccessMessage) {
+                    // onend handler will run and perform cleanup
+                    // We rely on onend to show the success message
+                }
+            } else {
+                // Handle manual cleanup if state is inconsistent
+                if (currentTargetButton) {
+                    updateButtonState(currentTargetButton, false);
+                }
+                isRecognizing = false;
+                currentTargetButton = null;
+                currentTargetElement = null;
+            }
         }
 
 
@@ -234,33 +275,66 @@
                 const targetId = button.getAttribute('data-target');
                 const targetElement = document.getElementById(targetId);
 
-                if (!targetElement) {
-                    console.error(`Target element with ID ${targetId} not found.`);
-                    return;
-                }
-
-                if (isRecognizing) {
-                    // If we click a button while another recognition is running, stop it first.
-                    recognition.stop();
-                } else {
-                    // Start recognition
-                    const newRecognition = initRecognition(targetElement);
-                    if (newRecognition) {
-                        try {
-                            newRecognition.start();
-                        } catch (e) {
-                            if (e.name === 'InvalidStateError') {
-                                // Sometimes happens if recognition.stop() hasn't fully registered before calling start again.
-                                console.warn("Recognition already active or in invalid state. Trying to stop and restart...");
-                                displayMessage('Recognition error. Please try again.', 'error');
-                            } else {
-                                console.error("Error starting recognition:", e);
-                            }
-                        }
+                // Logic to stop the current dictation
+                if (isRecognizing && currentTargetButton && currentTargetButton.isEqualNode(button)) {
+                    stopRecognition();
+                } 
+                // Logic to switch dictation to a new field, or start a new one
+                else {
+                    // Stop current recognition (if any) before starting the new one
+                    if (isRecognizing) {
+                        stopRecognition(false); // Do not show success message when switching
+                        // Add a small delay when switching to prevent race condition/InvalidStateError
+                        setTimeout(() => startRecognition(targetElement, button), 50);
+                    } else {
+                        startRecognition(targetElement, button);
                     }
                 }
             });
         });
+        
+        // --- PDF Download Function ---
+
+        /**
+         * Downloads the content of the lesson notes section as a PDF.
+         */
+        function downloadPDF() {
+            // Select the main content div for PDF conversion
+            const element = document.getElementById('lessonForm');
+            
+            // Create a temporary element to hold the header for the PDF
+            const date = new Date().toISOString().slice(0, 10);
+            const header = document.createElement('div');
+            header.innerHTML = `<h1 style="text-align: center; font-size: 24px; font-weight: bold; margin-bottom: 20px;">Lesson Log - ${date}</h1>`;
+
+            // Prepare the element for PDF conversion: temporarily append the header
+            element.insertBefore(header, element.firstChild); 
+            
+            // Configuration for html2pdf
+            const options = {
+                margin: 10,
+                filename: 'Lesson_Log_' + date + '.pdf',
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2 },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            displayMessage("Generating PDF...", 'info');
+            
+            html2pdf().from(element).set(options).save().then(() => {
+                // Remove the temporary header after saving
+                element.removeChild(header);
+                displayMessage("PDF downloaded successfully!", 'success');
+            }).catch(error => {
+                console.error("PDF generation failed:", error);
+                // Remove the temporary header even on failure
+                if(header.parentNode) {
+                    header.parentNode.removeChild(header);
+                }
+                displayMessage("Failed to generate PDF. Check console for details.", 'error');
+            });
+        }
+
 
         // Initialize on window load (optional, but good practice)
         window.onload = function() {
