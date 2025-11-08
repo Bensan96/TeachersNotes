@@ -1,1 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lesson Note Dictation Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #3b82f6; /* blue-500 */
+            --primary-dark: #2563eb; /* blue-600 */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc; /* slate-50 */
+        }
+        .container-wrapper {
+            max-width: 640px; /* sm breakpoint */
+            min-height: 100vh;
+        }
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-4">
 
+    <div id="app" class="container-wrapper mx-auto bg-white shadow-xl rounded-2xl p-6 md:p-8 space-y-6">
+
+        <header class="text-center pb-4 border-b border-gray-200">
+            <h1 class="text-3xl font-extrabold text-gray-900">Lesson Log Assistant</h1>
+            <p class="text-sm text-gray-500 mt-1">Dictate your lesson notes quickly and easily.</p>
+        </header>
+
+        <!-- Message Box for User Feedback -->
+        <div id="messageBox" class="hidden p-3 text-sm rounded-lg font-medium shadow-md transition duration-300" role="alert">
+            <p id="messageText"></p>
+        </div>
+
+        <div id="lessonForm" class="space-y-6">
+
+            <!-- Lesson Topic -->
+            <div class="space-y-2">
+                <label for="lessonTopic" class="text-sm font-semibold text-gray-700 block">1. Lesson Topic</label>
+                <div class="flex items-start space-x-2">
+                    <textarea id="lessonTopic" class="flex-grow w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 text-base" rows="1" placeholder="Type or speak the lesson topic..."></textarea>
+                    <button type="button" data-target="lessonTopic" class="speak-btn bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-600 transition duration-150 whitespace-nowrap text-sm h-10 flex-shrink-0">
+                        Start Speaking
+                    </button>
+                </div>
+            </div>
+
+            <!-- Learning Objectives -->
+            <div class="space-y-2">
+                <label for="learningObjectives" class="text-sm font-semibold text-gray-700 block">2. Learning Objectives Achieved</label>
+                <div class="flex items-start space-x-2">
+                    <textarea id="learningObjectives" class="flex-grow w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 text-base" rows="3" placeholder="Type or speak the key objectives covered..."></textarea>
+                    <button type="button" data-target="learningObjectives" class="speak-btn bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-600 transition duration-150 whitespace-nowrap text-sm h-10 flex-shrink-0">
+                        Start Speaking
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main Activities -->
+            <div class="space-y-2">
+                <label for="mainActivities" class="text-sm font-semibold text-gray-700 block">3. Main Activities & Student Engagement</label>
+                <div class="flex items-start space-x-2">
+                    <textarea id="mainActivities" class="flex-grow w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 text-base" rows="5" placeholder="Type or speak a summary of the main tasks and student interaction..."></textarea>
+                    <button type="button" data-target="mainActivities" class="speak-btn bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-600 transition duration-150 whitespace-nowrap text-sm h-10 flex-shrink-0">
+                        Start Speaking
+                    </button>
+                </div>
+            </div>
+
+            <!-- Teacher Reflection -->
+            <div class="space-y-2">
+                <label for="teacherReflection" class="text-sm font-semibold text-gray-700 block">4. Teacher Reflection & Next Steps</label>
+                <div class="flex items-start space-x-2">
+                    <textarea id="teacherReflection" class="flex-grow w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 text-base" rows="4" placeholder="Type or speak your personal reflection and plan for the next lesson..."></textarea>
+                    <button type="button" data-target="teacherReflection" class="speak-btn bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-600 transition duration-150 whitespace-nowrap text-sm h-10 flex-shrink-0">
+                        Start Speaking
+                    </button>
+                </div>
+            </div>
+
+            <button type="button" onclick="document.getElementById('lessonForm').reset()" class="w-full bg-gray-200 text-gray-700 font-bold py-3 rounded-lg hover:bg-gray-300 transition duration-150 shadow-inner">
+                Clear All Notes
+            </button>
+
+        </div>
+    </div>
+
+    <script>
+        // Check for SpeechRecognition support across different browsers
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        const messageBox = document.getElementById('messageBox');
+        const messageText = document.getElementById('messageText');
+        const speakButtons = document.querySelectorAll('.speak-btn');
+        let recognition = null;
+        let isRecognizing = false;
+        let currentTargetElement = null;
+        let originalButtonText = "Start Speaking";
+
+        // --- Utility Functions ---
+
+        /**
+         * Displays a message in the notification box.
+         * @param {string} text The message to display.
+         * @param {string} type 'success', 'error', or 'info' for styling.
+         */
+        function displayMessage(text, type = 'info') {
+            messageText.textContent = text;
+            messageBox.className = "p-3 text-sm rounded-lg font-medium shadow-md transition duration-300";
+            messageBox.classList.remove('hidden');
+
+            // Apply Tailwind classes based on type
+            if (type === 'error') {
+                messageBox.classList.add('bg-red-100', 'text-red-700');
+            } else if (type === 'success') {
+                messageBox.classList.add('bg-green-100', 'text-green-700');
+            } else { // info
+                messageBox.classList.add('bg-blue-100', 'text-blue-700');
+            }
+
+            // Automatically hide after 4 seconds
+            clearTimeout(window.messageTimer);
+            window.messageTimer = setTimeout(() => {
+                messageBox.classList.add('hidden');
+            }, 4000);
+        }
+
+        /**
+         * Updates the state of the button (text and color)
+         * @param {Element} button The button element to update.
+         * @param {boolean} active If true, set to active state (listening).
+         */
+        function updateButtonState(button, active) {
+            if (active) {
+                button.textContent = "Listening...";
+                button.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+                button.classList.add('bg-red-500', 'hover:bg-red-600');
+                button.disabled = true; // Disable current button while recognizing
+            } else {
+                button.textContent = originalButtonText;
+                button.classList.remove('bg-red-500', 'hover:bg-red-600');
+                button.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                // Re-enable all buttons once recognition is finished/stopped
+                speakButtons.forEach(btn => btn.disabled = false);
+            }
+        }
+
+        // --- Speech Recognition Setup ---
+
+        function initRecognition(targetElement) {
+            if (!SpeechRecognition) {
+                displayMessage("Speech recognition is not supported in this browser. Please try Chrome, Edge, or an updated version of Safari.", 'error');
+                return null;
+            }
+
+            // Stop any existing recognition instance first
+            if (recognition && isRecognizing) {
+                recognition.stop();
+            }
+
+            // Create new instance
+            recognition = new SpeechRecognition();
+            recognition.continuous = true; // Keep listening until explicitly stopped
+            recognition.interimResults = true; // Show results as they are being recognized
+            recognition.lang = 'en-US'; // Default language
+
+            currentTargetElement = targetElement;
+            const targetButton = document.querySelector(`[data-target="${targetElement.id}"]`);
+
+            recognition.onstart = () => {
+                isRecognizing = true;
+                updateButtonState(targetButton, true);
+                displayMessage(`Recording started for ${targetElement.id}. Speak now...`, 'info');
+            };
+
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript;
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+
+                // If this is the first result, set the element's content, otherwise append
+                if (event.resultIndex === 0 && !targetElement.value) {
+                    targetElement.value = finalTranscript;
+                } else if (finalTranscript) {
+                    // Append new final text, preceded by a space or new line for clarity
+                    targetElement.value += (targetElement.value.endsWith('.') || targetElement.value.endsWith('\n') ? ' ' : '\n') + finalTranscript;
+                }
+                // Optional: Show interim results for live feedback (can be removed if distracting)
+                // targetElement.placeholder = targetElement.value + interimTranscript + '...';
+            };
+
+            recognition.onerror = (event) => {
+                isRecognizing = false;
+                updateButtonState(targetButton, false);
+                console.error('Speech Recognition Error:', event.error);
+                let errorMessage = 'An error occurred during speech recognition.';
+                if (event.error === 'not-allowed') {
+                    errorMessage = 'Microphone access denied. Please check your browser permissions.';
+                } else if (event.error === 'no-speech') {
+                    errorMessage = 'No speech detected. Please speak louder or clearer.';
+                }
+                displayMessage(errorMessage, 'error');
+            };
+
+            recognition.onend = () => {
+                isRecognizing = false;
+                updateButtonState(targetButton, false);
+                displayMessage('Dictation stopped. Finalizing text...', 'success');
+            };
+
+            return recognition;
+        }
+
+
+        // --- Event Listener Setup ---
+
+        speakButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const targetId = button.getAttribute('data-target');
+                const targetElement = document.getElementById(targetId);
+
+                if (!targetElement) {
+                    console.error(`Target element with ID ${targetId} not found.`);
+                    return;
+                }
+
+                if (isRecognizing) {
+                    // If we click a button while another recognition is running, stop it first.
+                    recognition.stop();
+                } else {
+                    // Start recognition
+                    const newRecognition = initRecognition(targetElement);
+                    if (newRecognition) {
+                        try {
+                            newRecognition.start();
+                        } catch (e) {
+                            if (e.name === 'InvalidStateError') {
+                                // Sometimes happens if recognition.stop() hasn't fully registered before calling start again.
+                                console.warn("Recognition already active or in invalid state. Trying to stop and restart...");
+                                displayMessage('Recognition error. Please try again.', 'error');
+                            } else {
+                                console.error("Error starting recognition:", e);
+                            }
+                        }
+                    }
+                }
+            });
+        });
+
+        // Initialize on window load (optional, but good practice)
+        window.onload = function() {
+            if (!SpeechRecognition) {
+                displayMessage("Speech recognition is not available on this device/browser.", 'error');
+            } else {
+                displayMessage("App is ready! Tap 'Start Speaking' to begin dictating.", 'info');
+            }
+        };
+
+    </script>
+</body>
+</html>
